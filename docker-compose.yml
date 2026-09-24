@@ -1,0 +1,86 @@
+﻿services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sds_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: spark_dwh
+    ports:
+      - "5435:5432"
+    volumes:
+      - ./init:/docker-entrypoint-initdb.d:ro
+      - ./исходные данные:/data:ro
+      - sds_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d spark_dwh"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [sds_net]
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: sds_clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: marts
+      CLICKHOUSE_USER: user
+      CLICKHOUSE_PASSWORD: password
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "8125:8123"
+      - "9002:9000"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks: [sds_net]
+
+  spark-master:
+    image: apache/spark:3.5.1
+    container_name: sds_spark_master
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "8090:8080"
+      - "7078:7077"
+    volumes:
+      - ./spark:/opt/spark/app:ro
+      - ./jars:/opt/spark/drivers:ro
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master --host spark-master --port 7077 --webui-port 8080
+    networks: [sds_net]
+
+  spark-worker:
+    image: apache/spark:3.5.1
+    container_name: sds_spark_worker
+    restart: unless-stopped
+    depends_on:
+      - spark-master
+    ports:
+      - "8091:8081"
+    environment:
+      SPARK_WORKER_CORES: "2"
+      SPARK_WORKER_MEMORY: "2G"
+    volumes:
+      - ./spark:/opt/spark/app:ro
+      - ./jars:/opt/spark/drivers:ro
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077 --webui-port 8081
+    networks: [sds_net]
+
+volumes:
+  sds_pgdata:
+
+networks:
+  sds_net:
+    driver: bridge

@@ -1,0 +1,8 @@
+jars/*.jar
+!jars/.gitkeep
+*.log
+__pycache__/
+.ipynb_checkpoints/
+.idea/
+.vscode/
+sds_pgdata/
